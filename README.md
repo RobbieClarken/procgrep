@@ -18,4 +18,7 @@ $ procgrep vim
 84902
 82219
 67524
+$ procgrep --tty /dev/ttys003
+87976
+61281
 ```

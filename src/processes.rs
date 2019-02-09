@@ -225,7 +225,7 @@ pub struct Process {
     pub uid: i64,
     pub gid: i64,
     pub ppid: i64,
-    pub tty: i64,
+    pub tty: i32,
     pub command: String,
     pub args: Option<Vec<String>>,
 }
@@ -331,7 +331,7 @@ pub fn get_processes() -> Vec<Process> {
             uid: proc.kp_eproc.e_pcred.p_ruid as i64,
             gid: proc.kp_eproc.e_pcred.p_rgid as i64,
             ppid: proc.kp_eproc.e_ppid as i64,
-            tty: proc.kp_eproc.e_tdev as i64,
+            tty: proc.kp_eproc.e_tdev,
             command: String::from(comm),
             args: optional_args,
         });
