@@ -135,7 +135,14 @@ struct kinfo_proc {
     _kp_eproc: [c_uchar; KINFO_KP_EPROC_LEN],
 }
 
-fn main() {
+
+struct Process {
+    pid: i32,
+    command: String,
+    args: Option<Vec<String>>,
+}
+
+fn get_processes() -> Vec<Process> {
     let mut name: [c_int; 3] = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
     let mut length: libc::size_t = 0;
     let mut err = unsafe {
@@ -173,6 +180,8 @@ fn main() {
     let n = length / mem::size_of::<kinfo_proc>();
     let procs = unsafe { std::slice::from_raw_parts(struct_ptr, n) };
 
+    let mut processes = Vec::new();
+
     for proc in procs {
         let comm = unsafe { CStr::from_ptr(proc.kp_proc.p_comm.as_ptr()) };
         let comm = comm.to_str().unwrap();
@@ -207,7 +216,7 @@ fn main() {
                 0,
             )
         };
-        let mut args: Vec<String> = Vec::new();
+        let mut optional_args = None;
         if err == 0 {
             let buf_ptr = buf.as_ptr();
             let mut off = 0;
@@ -215,18 +224,37 @@ fn main() {
             off += mem::size_of_val(&nargs);
             let exec_path = unsafe { CStr::from_ptr(buf_ptr.add(off) as *const i8) };
             off += exec_path.to_bytes().len() + 1;
-            while unsafe { buf_ptr.add(off).read() } == 0 {
-                // should impl some check that off isn't beyond end of buf
+            while unsafe { buf_ptr.add(off).read() } == 0 && off < buf.len() {
                 off += 1;
             }
+            if off >= buf.len() {
+                panic!();
+            }
+            let mut args: Vec<String> = Vec::new();
             for _ in 0..nargs {
                 let arg = unsafe { CStr::from_ptr(buf_ptr.add(off) as *const i8) };
                 args.push(String::from(arg.to_str().unwrap()));
                 off += arg.to_bytes().len() + 1;
             }
-            println!("{} - {} - {}", proc.kp_proc.p_pid, comm, args.join(" "));
+            optional_args = Some(args);
+        }
+        processes.push(
+            Process {
+                pid: proc.kp_proc.p_pid,
+                command: String::from(comm),
+                args: optional_args,
+            }
+        );
+    }
+    processes
+}
+
+fn main() {
+    for process in get_processes() {
+        if let Some(args) = process.args {
+            println!("{} - {} - {}", process.pid, process.command, args.join(" "));
         } else {
-            println!("{} - {}", proc.kp_proc.p_pid, comm);
+            println!("{} - {}", process.pid, process.command);
         }
     }
 }
