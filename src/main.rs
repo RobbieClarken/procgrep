@@ -3,7 +3,7 @@
 
 use libc::{c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ushort, c_void};
 use libc::{dev_t, gid_t, pid_t, uid_t};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::mem;
 use std::ptr;
 
@@ -332,13 +332,28 @@ fn get_processes() -> Vec<Process> {
             uid: proc.kp_eproc.e_pcred.p_ruid as i64,
             gid: proc.kp_eproc.e_pcred.p_rgid as i64,
             ppid: proc.kp_eproc.e_ppid as i64,
-            tty: (proc.kp_eproc.e_tdev & 0xff) as i64,
+            tty: proc.kp_eproc.e_tdev as i64,
             command: String::from(comm),
             args: optional_args,
         });
     }
     processes
 }
+
+
+fn get_tty(path: &str) -> i32 {
+    let path = match path.starts_with("/") {
+        true => String::from(path),
+        false => format!("/dev/{}", path),
+    };
+    let path = CString::new(path).unwrap();
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::stat(path.as_ptr(), &mut stat) } != 0 {
+        panic!();
+    }
+    stat.st_rdev
+}
+
 
 fn main() {
     for process in get_processes() {
@@ -353,4 +368,5 @@ fn main() {
             args.join(" ")
         );
     }
+    dbg!(get_tty("/dev/ttys005"));
 }
