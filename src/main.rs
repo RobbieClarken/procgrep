@@ -1,13 +1,14 @@
 #![feature(untagged_unions)]
 #![allow(non_camel_case_types)]
 
-use libc::{c_char, c_int, c_long, c_uchar, c_uint, c_ushort, c_void};
+use libc::{c_char, c_int, c_long, c_short, c_uchar, c_uint, c_ushort, c_void};
+use libc::{dev_t, gid_t, pid_t, uid_t};
 use std::ffi::CStr;
 use std::mem;
 use std::ptr;
 
 const MAXCOMLEN: usize = 16;
-const KINFO_KP_EPROC_LEN: usize = 352;
+const NGROUPS: usize = 16;
 
 #[repr(C)]
 struct sleep_queue {
@@ -55,9 +56,9 @@ struct extern_proc {
     // char  p_stat;      /* S* process status. */
     p_stat: char,
     // pid_t  p_pid;      /* Process identifier. */
-    p_pid: libc::pid_t,
+    p_pid: pid_t,
     // pid_t  p_oppid;   /* Save parent pid during ptrace. XXX */
-    p_oppid: libc::pid_t,
+    p_oppid: pid_t,
     // int  p_dupfd;   /* Sideways return value from fdopen. XXX */
     p_dupfd: c_int,
     // /* Mach related  */
@@ -130,20 +131,108 @@ struct extern_proc {
     p_ru: *const c_void,
 }
 
-struct kinfo_proc {
-    kp_proc: extern_proc,
-    _kp_eproc: [c_uchar; KINFO_KP_EPROC_LEN],
+#[repr(C)]
+struct _pcred {
+    // char pc_lock[72];  /* opaque content */
+    pc_lock: [c_char; 72],
+    // struct ucred *pc_ucred; /* Current credentials. */
+    pc_ucred: *const c_void,
+    // uid_t p_ruid;   /* Real user id. */
+    p_ruid: uid_t,
+    // uid_t p_svuid;  /* Saved effective user id. */
+    p_svuid: uid_t,
+    // gid_t p_rgid;   /* Real group id. */
+    p_rgid: gid_t,
+    // gid_t p_svgid;  /* Saved effective group id. */
+    p_svgid: gid_t,
+    // int p_refcnt;  /* Number of references. */
+    p_refcnt: c_int,
 }
 
+#[repr(C)]
+struct _ucred {
+    // int32_t cr_ref;   /* reference count */
+    cr_ref: i32,
+    // uid_t cr_uid;   /* effective user id */
+    cr_uid: uid_t,
+    // short cr_ngroups;  /* number of groups */
+    cr_ngroups: c_short,
+    // gid_t cr_groups[NGROUPS]; /* groups */
+    cr_groups: [gid_t; NGROUPS],
+}
 
-struct Process {
-    pid: i32,
-    command: String,
-    args: Option<Vec<String>>,
+#[repr(C)]
+struct vmspace {
+    // int32_t dummy;
+    dummy: i32,
+    // caddr_t dummy2;
+    dummy2: *const c_void,
+    // int32_t dummy3[5];
+    dummy3: [i32; 5],
+    // caddr_t dummy4[3];
+    dummy4: [*const c_void; 3],
+}
+
+#[repr(C)]
+struct eproc {
+    // struct proc *e_paddr;  /* address of proc */
+    e_paddr: *const c_void,
+    // struct session *e_sess; /* session pointer */
+    e_sess: *const c_void,
+    // struct _pcred e_pcred;  /* process credentials */
+    e_pcred: _pcred,
+    // struct _ucred e_ucred;  /* current credentials */
+    e_ucred: _ucred,
+    // struct  vmspace e_vm;  /* address space */
+    e_vm: vmspace,
+    // pid_t e_ppid;   /* parent process id */
+    e_ppid: pid_t,
+    // pid_t e_pgid;   /* process group id */
+    e_pgid: pid_t,
+    // short e_jobc;   /* job control counter */
+    e_jobc: c_short,
+    // dev_t e_tdev;   /* controlling tty dev */
+    e_tdev: dev_t,
+    // pid_t e_tpgid;  /* tty process group id */
+    e_tpgid: pid_t,
+    // struct session *e_tsess; /* tty session pointer */
+    session: *const c_void,
+    // char e_wmesg[8]; /* wchan message */
+    e_wmesg: [c_char; 8],
+    // segsz_t e_xsize;  /* text size */
+    e_xsize: i32,
+    // short e_xrssize;  /* text rss */
+    e_xrssize: c_short,
+    // short e_xccount;  /* text references */
+    e_xccount: c_short,
+    // short e_xswrss;
+    e_xswrss: c_short,
+    // int32_t e_flag;
+    e_flag: i32,
+    // char e_login[12]; /* short setlogin() name */
+    e_login: [c_char; 12],
+    // int32_t e_spare[4];
+    e_spare: [i32; 4],
+}
+
+#[repr(C)]
+struct kinfo_proc {
+    kp_proc: extern_proc,
+    kp_eproc: eproc,
+}
+
+pub struct Process {
+    pub pid: i64,
+    pub uid: i64,
+    pub gid: i64,
+    pub ppid: i64,
+    pub tty: i64,
+    pub command: String,
+    pub args: Option<Vec<String>>,
 }
 
 fn get_processes() -> Vec<Process> {
-    let mut name: [c_int; 3] = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
+    let mut name = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL];
     let mut length: libc::size_t = 0;
     let mut err = unsafe {
         libc::sysctl(
@@ -238,23 +327,30 @@ fn get_processes() -> Vec<Process> {
             }
             optional_args = Some(args);
         }
-        processes.push(
-            Process {
-                pid: proc.kp_proc.p_pid,
-                command: String::from(comm),
-                args: optional_args,
-            }
-        );
+        processes.push(Process {
+            pid: proc.kp_proc.p_pid as i64,
+            uid: proc.kp_eproc.e_pcred.p_ruid as i64,
+            gid: proc.kp_eproc.e_pcred.p_rgid as i64,
+            ppid: proc.kp_eproc.e_ppid as i64,
+            tty: (proc.kp_eproc.e_tdev & 0xff) as i64,
+            command: String::from(comm),
+            args: optional_args,
+        });
     }
     processes
 }
 
 fn main() {
     for process in get_processes() {
-        if let Some(args) = process.args {
-            println!("{} - {} - {}", process.pid, process.command, args.join(" "));
-        } else {
-            println!("{} - {}", process.pid, process.command);
-        }
+        let args = process.args.unwrap_or_else(Vec::new);
+        println!(
+            "{} {} {} [{}] - {} - {}",
+            process.pid,
+            process.ppid,
+            process.tty,
+            process.uid,
+            process.command,
+            args.join(" ")
+        );
     }
 }
