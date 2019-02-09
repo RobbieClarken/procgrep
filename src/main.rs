@@ -34,10 +34,10 @@ fn main() {
         println!("{}", USAGE);
         return;
     }
-    let mut tty = None;
-    if args.flag_tty.len() > 0 {
-        tty = Some(tty::get_tty(&args.flag_tty));
-    }
+    let tty = match args.flag_tty.len() {
+        0 => None,
+        _ => Some(tty::get_tty(&args.flag_tty)),
+    };
     for process in processes::get_processes() {
         if let Some(t) = tty {
             if process.tty != t {
