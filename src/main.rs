@@ -6,6 +6,8 @@ use serde_derive::Deserialize;
 mod processes;
 mod tty;
 
+use processes::Process;
+
 const USAGE: &'static str = "
 procgrep
 
@@ -26,6 +28,29 @@ struct Args {
     flag_help: bool,
 }
 
+trait Matcher {
+    fn matches(&self, process: &Process) -> bool;
+}
+
+struct TtyMatcher {
+    tty: i32,
+}
+
+impl Matcher for TtyMatcher {
+    fn matches(&self, process: &Process) -> bool {
+        process.tty == self.tty
+    }
+}
+
+struct PatternMatcher {
+    pattern: String,
+}
+impl Matcher for PatternMatcher {
+    fn matches(&self, process: &Process) -> bool {
+        process.command.contains(&self.pattern)
+    }
+}
+
 fn main() {
     let args: Args = Docopt::new(USAGE)
         .and_then(|d| d.deserialize())
@@ -34,18 +59,20 @@ fn main() {
         println!("{}", USAGE);
         return;
     }
-    let tty = match args.flag_tty.len() {
-        0 => None,
-        _ => Some(tty::get_tty(&args.flag_tty)),
-    };
+    let mut matchers: Vec<Box<dyn Matcher>> = Vec::new();
+    if args.flag_tty.len() > 0 {
+        let tty = tty::get_tty(&args.flag_tty).expect("invalid tty");
+        matchers.push(Box::new(TtyMatcher { tty }));
+    }
+    if args.arg_pattern.len() > 0 {
+        matchers.push(Box::new(PatternMatcher {
+            pattern: args.arg_pattern,
+        }));
+    }
     for process in processes::get_processes() {
-        if let Some(t) = tty {
-            if process.tty != t {
-                continue;
-            }
+        if !matchers.iter().all(|matcher| matcher.matches(&process)) {
+            continue;
         }
-        if process.command.contains(&args.arg_pattern) {
-            println!("{}", process.pid);
-        }
+        println!("{} {}", process.pid, process.command);
     }
 }
